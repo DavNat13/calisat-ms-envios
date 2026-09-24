@@ -2,7 +2,9 @@ package com.calisat.msenvios.service;
 
 import com.calisat.msenvios.client.NotificacionEventoDto;
 import com.calisat.msenvios.client.NotificacionesClient;
+import com.calisat.msenvios.config.RabbitConfig;
 import com.calisat.msenvios.dto.EnvioEstadoRequest;
+import com.calisat.msenvios.dto.EnvioMensaje;
 import com.calisat.msenvios.dto.EnvioRequest;
 import com.calisat.msenvios.dto.SeguimientoResponse;
 import com.calisat.msenvios.exception.EnvioDuplicadoException;
@@ -18,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -44,6 +48,9 @@ class EnvioServiceTest {
 
     @Mock
     private NotificacionesClient notificacionesClient;
+
+    @Mock
+    private RabbitTemplate rabbitTemplate;
 
     @InjectMocks
     private EnvioService envioService;
@@ -183,6 +190,15 @@ class EnvioServiceTest {
 
         verify(notificacionesClient).publicar(
                 eq("envio-" + id + "-DESPACHADO"), any(NotificacionEventoDto.class));
+        ArgumentCaptor<EnvioMensaje> mensajeCaptor = ArgumentCaptor.forClass(EnvioMensaje.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(RabbitConfig.ROUTING_KEY_ENVIO_DESPACHADO), mensajeCaptor.capture());
+        EnvioMensaje mensaje = mensajeCaptor.getValue();
+        assertEquals(id.toString(), mensaje.envioId());
+        assertEquals("sub-123", mensaje.usuarioSub());
+        assertEquals("CAL-ABC123DEF456", mensaje.numeroGuia());
+        assertEquals("ENVIO_DESPACHADO", mensaje.evento());
+        assertEquals("DESPACHADO", mensaje.estado());
     }
 
     @Test
@@ -202,6 +218,11 @@ class EnvioServiceTest {
 
         verify(notificacionesClient).publicar(
                 eq("envio-" + id + "-ENTREGADO"), any(NotificacionEventoDto.class));
+        ArgumentCaptor<EnvioMensaje> mensajeCaptor = ArgumentCaptor.forClass(EnvioMensaje.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(RabbitConfig.ROUTING_KEY_ENVIO_ENTREGADO), mensajeCaptor.capture());
+        assertEquals("ENVIO_ENTREGADO", mensajeCaptor.getValue().evento());
+        assertEquals("ENTREGADO", mensajeCaptor.getValue().estado());
     }
 
     @Test
@@ -219,6 +240,7 @@ class EnvioServiceTest {
         envioService.actualizarEstado(id, new EnvioEstadoRequest("EN_PREPARACION", null, null));
 
         verify(notificacionesClient, never()).publicar(any(), any());
+        verify(rabbitTemplate, never()).convertAndSend(anyString(), any(Object.class));
     }
 
     @Test
@@ -235,6 +257,28 @@ class EnvioServiceTest {
         when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
         org.mockito.Mockito.doThrow(new IllegalStateException("notificaciones caido"))
                 .when(notificacionesClient).publicar(any(), any());
+
+        Optional<Envio> resultado = envioService.actualizarEstado(
+                id, new EnvioEstadoRequest("DESPACHADO", null, null));
+
+        assertTrue(resultado.isPresent());
+        assertEquals(EstadoEnvio.DESPACHADO, resultado.get().getEstado());
+    }
+
+    @Test
+    void actualizarEstado_noLanzaExcepcionSiElBrokerRabbitEstaCaido() {
+        UUID id = UUID.randomUUID();
+        Envio envio = new Envio();
+        envio.setId(id);
+        envio.setOrdenId(UUID.randomUUID());
+        envio.setNumeroGuia("CAL-ABC123DEF456");
+        envio.setUsuarioSub("sub-123");
+        envio.setEstado(EstadoEnvio.EN_PREPARACION);
+        when(envioRepository.findById(id)).thenReturn(Optional.of(envio));
+        when(envioRepository.save(any(Envio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.doThrow(new IllegalStateException("broker caido"))
+                .when(rabbitTemplate).convertAndSend(anyString(), any(Object.class));
 
         Optional<Envio> resultado = envioService.actualizarEstado(
                 id, new EnvioEstadoRequest("DESPACHADO", null, null));

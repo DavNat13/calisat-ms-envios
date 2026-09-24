@@ -2,7 +2,9 @@ package com.calisat.msenvios.service;
 
 import com.calisat.msenvios.client.NotificacionEventoDto;
 import com.calisat.msenvios.client.NotificacionesClient;
+import com.calisat.msenvios.config.RabbitConfig;
 import com.calisat.msenvios.dto.EnvioEstadoRequest;
+import com.calisat.msenvios.dto.EnvioMensaje;
 import com.calisat.msenvios.dto.EnvioRequest;
 import com.calisat.msenvios.dto.SeguimientoResponse;
 import com.calisat.msenvios.dto.EnvioEventoResponse;
@@ -15,6 +17,7 @@ import com.calisat.msenvios.repository.EnvioEventoRepository;
 import com.calisat.msenvios.repository.EnvioRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,13 +37,16 @@ public class EnvioService {
     private final EnvioRepository envioRepository;
     private final EnvioEventoRepository envioEventoRepository;
     private final NotificacionesClient notificacionesClient;
+    private final RabbitTemplate rabbitTemplate;
 
     public EnvioService(EnvioRepository envioRepository,
                         EnvioEventoRepository envioEventoRepository,
-                        NotificacionesClient notificacionesClient) {
+                        NotificacionesClient notificacionesClient,
+                        RabbitTemplate rabbitTemplate) {
         this.envioRepository = envioRepository;
         this.envioEventoRepository = envioEventoRepository;
         this.notificacionesClient = notificacionesClient;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
     /**
@@ -144,8 +150,9 @@ public class EnvioService {
     /**
      * Fase B: publica ENVIO_DESPACHADO / ENVIO_ENTREGADO en
      * calisat-ms-notificaciones (email en cada hito de tracking, segun el
-     * diseno). Operacion best-effort con try/catch: si notificaciones esta
-     * caido, el cambio de estado del envio NO se interrumpe.
+     * diseno) via HTTP y en RabbitMQ (calisat.exchange) para el consumidor
+     * de notificaciones. Operacion best-effort con try/catch: si notificaciones
+     * o el broker estan caidos, el cambio de estado del envio NO se interrumpe.
      */
     private void publicarAvisoDeTracking(Envio envio, EstadoEnvio destino) {
         if (destino != EstadoEnvio.DESPACHADO && destino != EstadoEnvio.ENTREGADO) {
@@ -176,6 +183,33 @@ public class EnvioService {
             notificacionesClient.publicar("envio-" + envio.getId() + "-" + destino.name(), dto);
         } catch (RuntimeException ex) {
             log.error("No se pudo publicar el aviso '{}' a notificaciones (flujo principal continuado): {}",
+                    destino, ex.getMessage());
+        }
+        publicarEnRabbit(envio, destino);
+    }
+
+    /**
+     * Publica el hito de tracking en calisat.exchange (mejor esfuerzo):
+     * cualquier fallo del broker se registra y NO interrumpe el cambio
+     * de estado del envio.
+     */
+    private void publicarEnRabbit(Envio envio, EstadoEnvio destino) {
+        try {
+            String evento = destino == EstadoEnvio.DESPACHADO ? "ENVIO_DESPACHADO" : "ENVIO_ENTREGADO";
+            String routingKey = destino == EstadoEnvio.DESPACHADO
+                    ? RabbitConfig.ROUTING_KEY_ENVIO_DESPACHADO
+                    : RabbitConfig.ROUTING_KEY_ENVIO_ENTREGADO;
+            EnvioMensaje mensaje = new EnvioMensaje(
+                    String.valueOf(envio.getId()),
+                    String.valueOf(envio.getOrdenId()),
+                    envio.getUsuarioSub(),
+                    envio.getNumeroGuia(),
+                    envio.getTransportista(),
+                    evento,
+                    destino.name());
+            rabbitTemplate.convertAndSend(routingKey, mensaje);
+        } catch (RuntimeException ex) {
+            log.error("No se pudo publicar '{}' en RabbitMQ (flujo principal continuado): {}",
                     destino, ex.getMessage());
         }
     }

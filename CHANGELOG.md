@@ -1,5 +1,17 @@
 # Changelog - calisat-ms-envios
 
+## [2.2.0] - 2026-09-24
+
+### Changed
+- `EnvioService` ahora exige en su constructor el `RabbitTemplate` (productor RabbitMQ); cualquier construcción manual del servicio debe inyectarlo
+
+### Added
+- Productor RabbitMQ: dependencia `spring-boot-starter-amqp`, exchange `calisat.exchange` y `RabbitTemplate` con `Jackson2JsonMessageConverter`
+- Publicación de `envio.despachado` y `envio.entregado` en cada hito de tracking con payload JSON `EnvioMensaje` (envioId, ordenId, usuarioSub, numeroGuia, transportista, evento, estado); operación best-effort que jamás interrumpe el cambio de estado
+- Configuración RabbitMQ (localhost:5672, guest/guest) en `application.yaml`
+- Versión pom.xml actualizada a 2.2.0
+- Tests de publicación en RabbitMQ: hitos con aviso, estados sin evento y caída del broker
+
 ## [2.1.0] - 2026-09-24
 
 ### Added
@@ -37,6 +49,7 @@
 - Tests de servicio (EnvioServiceTest)
 - Health check via Spring Actuator
 
+[2.2.0]: https://github.com/DavNat13/calisat-ms-envios/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/DavNat13/calisat-ms-envios/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/DavNat13/calisat-ms-envios/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/DavNat13/calisat-ms-envios/releases/tag/v1.3.0
