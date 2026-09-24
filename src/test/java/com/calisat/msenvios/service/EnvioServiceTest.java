@@ -1,5 +1,7 @@
 package com.calisat.msenvios.service;
 
+import com.calisat.msenvios.client.NotificacionEventoDto;
+import com.calisat.msenvios.client.NotificacionesClient;
 import com.calisat.msenvios.dto.EnvioEstadoRequest;
 import com.calisat.msenvios.dto.EnvioRequest;
 import com.calisat.msenvios.dto.SeguimientoResponse;
@@ -26,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +41,9 @@ class EnvioServiceTest {
 
     @Mock
     private EnvioEventoRepository envioEventoRepository;
+
+    @Mock
+    private NotificacionesClient notificacionesClient;
 
     @InjectMocks
     private EnvioService envioService;
@@ -157,5 +164,82 @@ class EnvioServiceTest {
         when(envioRepository.findByNumeroGuia("CAL-NOEXISTE")).thenReturn(Optional.empty());
 
         assertTrue(envioService.seguimiento("CAL-NOEXISTE").isEmpty());
+    }
+
+    @Test
+    void actualizarEstado_publicaEventoDeNotificacionAlDespachar() {
+        UUID id = UUID.randomUUID();
+        Envio envio = new Envio();
+        envio.setId(id);
+        envio.setOrdenId(UUID.randomUUID());
+        envio.setNumeroGuia("CAL-ABC123DEF456");
+        envio.setUsuarioSub("sub-123");
+        envio.setEstado(EstadoEnvio.EN_PREPARACION);
+        when(envioRepository.findById(id)).thenReturn(Optional.of(envio));
+        when(envioRepository.save(any(Envio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        envioService.actualizarEstado(id, new EnvioEstadoRequest("DESPACHADO", "Sale del hub", "Madrid"));
+
+        verify(notificacionesClient).publicar(
+                eq("envio-" + id + "-DESPACHADO"), any(NotificacionEventoDto.class));
+    }
+
+    @Test
+    void actualizarEstado_publicaEventoDeNotificacionAlEntregar() {
+        UUID id = UUID.randomUUID();
+        Envio envio = new Envio();
+        envio.setId(id);
+        envio.setOrdenId(UUID.randomUUID());
+        envio.setNumeroGuia("CAL-ABC123DEF456");
+        envio.setUsuarioSub("sub-123");
+        envio.setEstado(EstadoEnvio.EN_TRANSITO);
+        when(envioRepository.findById(id)).thenReturn(Optional.of(envio));
+        when(envioRepository.save(any(Envio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        envioService.actualizarEstado(id, new EnvioEstadoRequest("ENTREGADO", "Entregado", "Toledo"));
+
+        verify(notificacionesClient).publicar(
+                eq("envio-" + id + "-ENTREGADO"), any(NotificacionEventoDto.class));
+    }
+
+    @Test
+    void actualizarEstado_noPublicaEventosParaEstadosSinAviso() {
+        UUID id = UUID.randomUUID();
+        Envio envio = new Envio();
+        envio.setId(id);
+        envio.setOrdenId(UUID.randomUUID());
+        envio.setNumeroGuia("CAL-ABC123DEF456");
+        envio.setEstado(EstadoEnvio.CREADO);
+        when(envioRepository.findById(id)).thenReturn(Optional.of(envio));
+        when(envioRepository.save(any(Envio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        envioService.actualizarEstado(id, new EnvioEstadoRequest("EN_PREPARACION", null, null));
+
+        verify(notificacionesClient, never()).publicar(any(), any());
+    }
+
+    @Test
+    void actualizarEstado_noLanzaExcepcionSiNotificacionesEstaCaido() {
+        UUID id = UUID.randomUUID();
+        Envio envio = new Envio();
+        envio.setId(id);
+        envio.setOrdenId(UUID.randomUUID());
+        envio.setNumeroGuia("CAL-ABC123DEF456");
+        envio.setUsuarioSub("sub-123");
+        envio.setEstado(EstadoEnvio.EN_PREPARACION);
+        when(envioRepository.findById(id)).thenReturn(Optional.of(envio));
+        when(envioRepository.save(any(Envio.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(envioEventoRepository.save(any(EnvioEvento.class))).thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.doThrow(new IllegalStateException("notificaciones caido"))
+                .when(notificacionesClient).publicar(any(), any());
+
+        Optional<Envio> resultado = envioService.actualizarEstado(
+                id, new EnvioEstadoRequest("DESPACHADO", null, null));
+
+        assertTrue(resultado.isPresent());
+        assertEquals(EstadoEnvio.DESPACHADO, resultado.get().getEstado());
     }
 }

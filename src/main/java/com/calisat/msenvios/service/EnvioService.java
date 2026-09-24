@@ -1,5 +1,7 @@
 package com.calisat.msenvios.service;
 
+import com.calisat.msenvios.client.NotificacionEventoDto;
+import com.calisat.msenvios.client.NotificacionesClient;
 import com.calisat.msenvios.dto.EnvioEstadoRequest;
 import com.calisat.msenvios.dto.EnvioRequest;
 import com.calisat.msenvios.dto.SeguimientoResponse;
@@ -11,6 +13,8 @@ import com.calisat.msenvios.model.EnvioEvento;
 import com.calisat.msenvios.model.EstadoEnvio;
 import com.calisat.msenvios.repository.EnvioEventoRepository;
 import com.calisat.msenvios.repository.EnvioRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,15 +27,20 @@ import java.util.UUID;
 @Transactional
 public class EnvioService {
 
+    private static final Logger log = LoggerFactory.getLogger(EnvioService.class);
+
     private static final String PREFIJO_GUIA = "CAL-";
 
     private final EnvioRepository envioRepository;
     private final EnvioEventoRepository envioEventoRepository;
+    private final NotificacionesClient notificacionesClient;
 
     public EnvioService(EnvioRepository envioRepository,
-                        EnvioEventoRepository envioEventoRepository) {
+                        EnvioEventoRepository envioEventoRepository,
+                        NotificacionesClient notificacionesClient) {
         this.envioRepository = envioRepository;
         this.envioEventoRepository = envioEventoRepository;
+        this.notificacionesClient = notificacionesClient;
     }
 
     /**
@@ -104,7 +113,9 @@ public class EnvioService {
             envio.setFechaActualizacion(ahora);
 
             registrarEvento(envio, destino, request.descripcion(), request.ubicacion());
-            return envioRepository.save(envio);
+            Envio guardado = envioRepository.save(envio);
+            publicarAvisoDeTracking(guardado, destino);
+            return guardado;
         });
     }
 
@@ -128,6 +139,45 @@ public class EnvioService {
 
     private void registrarEvento(Envio envio, EstadoEnvio estado, String descripcion, String ubicacion) {
         envioEventoRepository.save(new EnvioEvento(envio, estado, descripcion, ubicacion));
+    }
+
+    /**
+     * Fase B: publica ENVIO_DESPACHADO / ENVIO_ENTREGADO en
+     * calisat-ms-notificaciones (email en cada hito de tracking, segun el
+     * diseno). Operacion best-effort con try/catch: si notificaciones esta
+     * caido, el cambio de estado del envio NO se interrumpe.
+     */
+    private void publicarAvisoDeTracking(Envio envio, EstadoEnvio destino) {
+        if (destino != EstadoEnvio.DESPACHADO && destino != EstadoEnvio.ENTREGADO) {
+            return;
+        }
+        try {
+            String evento = destino == EstadoEnvio.DESPACHADO ? "ENVIO_DESPACHADO" : "ENVIO_ENTREGADO";
+            String texto = destino == EstadoEnvio.DESPACHADO
+                    ? "Tu envio " + envio.getNumeroGuia() + " fue despachado."
+                    : "Tu envio " + envio.getNumeroGuia() + " fue entregado.";
+            String payload = "{\"envioId\":\"" + envio.getId()
+                    + "\",\"ordenId\":\"" + envio.getOrdenId()
+                    + "\",\"numeroGuia\":\"" + envio.getNumeroGuia()
+                    + "\",\"estado\":\"" + destino.name() + "\"}";
+            NotificacionEventoDto dto = new NotificacionEventoDto(
+                    "EMAIL",
+                    "TRANSACCIONAL",
+                    evento.replace("_", " ").toLowerCase() + ": " + envio.getNumeroGuia(),
+                    texto,
+                    null,
+                    envio.getUsuarioSub(),
+                    null,
+                    null,
+                    null,
+                    payload,
+                    "calisat-ms-envios",
+                    "envio-" + envio.getId());
+            notificacionesClient.publicar("envio-" + envio.getId() + "-" + destino.name(), dto);
+        } catch (RuntimeException ex) {
+            log.error("No se pudo publicar el aviso '{}' a notificaciones (flujo principal continuado): {}",
+                    destino, ex.getMessage());
+        }
     }
 
     private String generarNumeroGuia() {
