@@ -1,0 +1,44 @@
+services:
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: calisat-db-envios
+    environment:
+      POSTGRES_DB: calisat_envio
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - calisat_envio_data:/var/lib/postgresql/data
+    networks:
+      - calisat-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d calisat_envio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: calisat-ms-envios
+    ports:
+      - "8086:8080"
+    environment:
+      # El contenedor escucha en 8080 (mapeo 8086:8080); en local la app usa 8086.
+      SERVER_PORT: "8080"
+      # Dentro de la red docker el host del Postgres es el contenedor, no localhost.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://calisat-db-envios:5432/calisat_envio
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - calisat-net
+
+networks:
+  calisat-net:
+    driver: bridge
+
+volumes:
+  calisat_envio_data:
