@@ -11,6 +11,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,7 +32,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/envios")
 @Tag(name = "Envios", description = "Gestion de envios: creacion, cambio de estado y seguimiento publico por numero de guia. "
-        + "Todas las operaciones exigen JWT salvo GET /seguimiento/{numeroGuia}. Sin roles/RBAC: un unico nivel autenticado.")
+        + "Escrituras (POST/PUT) con RBAC ADMINISTRADOR|LOGISTICA; el listado global del panel es solo para esos roles; "
+        + "lecturas sin parametros devuelven los envios del usuario JWT; seguimiento publico sin JWT.")
 public class EnvioController {
 
     private final EnvioService envioService;
@@ -82,24 +85,31 @@ public class EnvioController {
      * Lista envios.
      *
      * <p>Si se proporciona {@code ordenId}, devuelve los envios de esa orden.
-     * Si se omite, devuelve los envios del usuario autenticado (claim
-     * {@code sub} del JWT); si el token no lo incluye, la lista es vacia.</p>
+     * Si se omite: los roles de gestion (ADMINISTRADOR|LOGISTICA) obtienen el
+     * listado global del panel; cualquier otro usuario autenticado obtiene
+     * sus propios envios (claim {@code sub} del JWT); si el token no lo
+     * incluye, la lista es vacia.</p>
      *
      * @param ordenId identificador logico de la orden (opcional)
      * @param jwt token del usuario autenticado
+     * @param authentication autenticacion actual (para el control de rol)
      * @return 200 con la lista de envios
      */
     @Operation(summary = "Listar envios",
-            description = "Lista envios por ordenId (parametro opcional). Si ordenId no se indica, "
-                    + "se listan los envios del usuario autenticado (claim 'sub' del JWT). Requiere JWT.")
+            description = "Lista envios por ordenId (parametro opcional). Sin ordenId: los roles ADMINISTRADOR/LOGISTICA "
+                    + "reciben el listado global (panel); el resto de usuarios autenticados reciben solo los suyos "
+                    + "(claim 'sub' del JWT). Requiere JWT.")
     @GetMapping
     public ResponseEntity<List<EnvioResponse>> listar(
-            @Parameter(name = "ordenId", description = "Identificador logico de la orden a filtrar. Si se omite, se filtra por el usuario del JWT.")
+            @Parameter(name = "ordenId", description = "Identificador logico de la orden a filtrar. Si se omite, se decide entre listado global (gestion) y envios propios.")
             @RequestParam(required = false) UUID ordenId,
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            Authentication authentication) {
         List<Envio> envios;
         if (ordenId != null) {
             envios = envioService.listarPorOrden(ordenId);
+        } else if (esGestion(authentication)) {
+            envios = envioService.listarTodas();
         } else {
             String sub = jwt != null ? jwt.getSubject() : null;
             envios = (sub == null || sub.isBlank())
@@ -107,6 +117,20 @@ public class EnvioController {
                     : envioService.listarPorUsuario(sub);
         }
         return ResponseEntity.ok(envios.stream().map(EnvioResponse::desde).toList());
+    }
+
+    /**
+     * Indica si la autenticacion actual pertenece a un rol de gestion del
+     * panel (ADMINISTRADOR o LOGISTICA). El converter de seguridad normaliza
+     * el claim {@code roles} a autoridades {@code ROLE_*} en mayusculas.
+     */
+    private static boolean esGestion(Authentication authentication) {
+        if (authentication == null) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(a -> "ROLE_ADMINISTRADOR".equals(a) || "ROLE_LOGISTICA".equals(a));
     }
 
     /**

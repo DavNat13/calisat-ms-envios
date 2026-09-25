@@ -18,6 +18,7 @@ import com.calisat.msenvios.repository.EnvioRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -83,6 +84,16 @@ public class EnvioService {
     @Transactional(readOnly = true)
     public List<Envio> listarPorUsuario(String usuarioSub) {
         return envioRepository.findByUsuarioSub(usuarioSub);
+    }
+
+    /**
+     * Listado global de todos los envios, del mas reciente al mas antiguo.
+     * Destinado al panel de administracion (ADMINISTRADOR|LOGISTICA): el
+     * control de rol se hace en el controller.
+     */
+    @Transactional(readOnly = true)
+    public List<Envio> listarTodas() {
+        return envioRepository.findAll(Sort.by("fechaCreacion").descending());
     }
 
     @Transactional(readOnly = true)

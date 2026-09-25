@@ -286,4 +286,30 @@ class EnvioServiceTest {
         assertTrue(resultado.isPresent());
         assertEquals(EstadoEnvio.DESPACHADO, resultado.get().getEstado());
     }
+
+    @Test
+    void listarTodas_devuelveElListadoDelRepositorio() {
+        Envio envio = new Envio();
+        envio.setId(UUID.randomUUID());
+        envio.setEstado(EstadoEnvio.CREADO);
+        when(envioRepository.findAll(any(org.springframework.data.domain.Sort.class)))
+                .thenReturn(List.of(envio));
+
+        List<Envio> resultado = envioService.listarTodas();
+
+        assertEquals(1, resultado.size());
+        verify(envioRepository).findAll(any(org.springframework.data.domain.Sort.class));
+        verify(envioRepository, never()).findByUsuarioSub(anyString());
+    }
+
+    @Test
+    void listarPorUsuario_filtraPorSub() {
+        String sub = "sub-456";
+        when(envioRepository.findByUsuarioSub(sub)).thenReturn(List.of());
+
+        List<Envio> resultado = envioService.listarPorUsuario(sub);
+
+        assertTrue(resultado.isEmpty());
+        verify(envioRepository).findByUsuarioSub(sub);
+    }
 }

@@ -1,5 +1,16 @@
 # Changelog - calisat-ms-envios
 
+## [2.3.0] - 2026-09-24
+
+### Added
+- Listado global de envíos para el panel de administración: `GET /api/v1/envios` sin parámetros devuelve **todos** los envíos (ordenados por `fechaCreacion` desc) cuando el JWT tiene rol `ADMINISTRADOR` o `LOGISTICA`; el resto de usuarios autenticados siguen recibiendo solo los suyos (claim `sub`), y con `?ordenId=` se mantiene el filtrado por orden para cualquier rol
+- `EnvioService.listarTodas()` con `Sort.by("fechaCreacion").descending()`
+- Tests: `EnvioControllerTest` (ramificación de roles: admin, logística, cliente, ordenId, sin autenticación) y tests de `listarTodas`/`listarPorUsuario` en `EnvioServiceTest`
+- Versión pom.xml actualizada a 2.3.0
+
+### Changed
+- Descripción Swagger de `EnvioController` actualizada: refleja el RBAC real (escrituras ADMIN|LOG, listado global solo gestión, seguimiento público sin JWT)
+
 ## [2.2.0] - 2026-09-24
 
 ### Changed
