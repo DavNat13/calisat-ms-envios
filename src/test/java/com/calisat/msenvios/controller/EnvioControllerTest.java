@@ -4,6 +4,7 @@ import com.calisat.msenvios.dto.EnvioResponse;
 import com.calisat.msenvios.model.Envio;
 import com.calisat.msenvios.model.EstadoEnvio;
 import com.calisat.msenvios.service.EnvioService;
+import com.calisat.msenvios.service.TarifaEnvioService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,7 +45,7 @@ class EnvioControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new EnvioController(envioService);
+        controller = new EnvioController(envioService, new TarifaEnvioService());
     }
 
     private static Jwt jwtConSub(String sub) {
