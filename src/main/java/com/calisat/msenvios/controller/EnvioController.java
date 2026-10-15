@@ -1,11 +1,14 @@
 package com.calisat.msenvios.controller;
 
+import com.calisat.msenvios.dto.CotizacionRequest;
+import com.calisat.msenvios.dto.CotizacionResponse;
 import com.calisat.msenvios.dto.EnvioEstadoRequest;
 import com.calisat.msenvios.dto.EnvioRequest;
 import com.calisat.msenvios.dto.EnvioResponse;
 import com.calisat.msenvios.dto.SeguimientoResponse;
 import com.calisat.msenvios.model.Envio;
 import com.calisat.msenvios.service.EnvioService;
+import com.calisat.msenvios.service.TarifaEnvioService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -37,9 +40,30 @@ import java.util.UUID;
 public class EnvioController {
 
     private final EnvioService envioService;
+    private final TarifaEnvioService tarifaEnvioService;
 
-    public EnvioController(EnvioService envioService) {
+    public EnvioController(EnvioService envioService, TarifaEnvioService tarifaEnvioService) {
         this.envioService = envioService;
+        this.tarifaEnvioService = tarifaEnvioService;
+    }
+
+    /**
+     * Cotiza el costo de envio del checkout.
+     *
+     * <p>Logica pura (sin persistencia): devuelve la zona, el costo en CLP
+     * y el plazo estimado segun ciudad/pais, subtotal y peso. El costo se
+     * envia en la creacion de la orden para que el total lo incluya.</p>
+     *
+     * @param request ciudad, pais, subtotal y peso del pedido
+     * @return 200 con la tarifa aplicada
+     */
+    @Operation(summary = "Cotizar envio",
+            description = "Calcula el costo de envio del checkout por zona (Sur/Centro/Norte/Internacional), "
+                    + "con envio gratis sobre 80000 CLP y recargo por peso sobre 3 kg. Requiere JWT.")
+    @PostMapping("/cotizar")
+    public ResponseEntity<CotizacionResponse> cotizar(
+            @Valid @RequestBody CotizacionRequest request) {
+        return ResponseEntity.ok(tarifaEnvioService.cotizar(request));
     }
 
     /**

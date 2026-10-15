@@ -3,6 +3,7 @@ package com.calisat.msenvios.config;
 import java.util.List;
 import java.util.Locale;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -18,6 +19,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -34,6 +36,10 @@ public class SecurityConfig {
 
     private static final String ALLOWED_ORIGIN =
             "https://ezeh839whh.execute-api.us-east-1.amazonaws.com";
+
+    /** Credencial MS->MS (misma clave que publican los demas microservicios). */
+    @Value("${calisat.servicio.token:}")
+    private String tokenDeServicio;
 
     @Bean
     public JwtDecoder jwtDecoder() {
@@ -88,7 +94,10 @@ public class SecurityConfig {
                 // Seguimiento publico por numero de guia (sin JWT).
                 .requestMatchers(HttpMethod.GET, "/api/v1/envios/seguimiento/**").permitAll()
                 // Creacion y transiciones de estado: administrador o logistica.
-                .requestMatchers(HttpMethod.POST, "/api/v1/envios").hasAnyRole("ADMINISTRADOR", "LOGISTICA")
+                // La creacion que dispara ms-orden llega con X-Service-Token
+                // -> SERVICIO (no hay usuario detras de esa llamada).
+                .requestMatchers(HttpMethod.POST, "/api/v1/envios")
+                        .hasAnyRole("ADMINISTRADOR", "LOGISTICA", "SERVICIO")
                 .requestMatchers(HttpMethod.PUT, "/api/v1/envios", "/api/v1/envios/**").hasAnyRole("ADMINISTRADOR", "LOGISTICA")
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
@@ -98,7 +107,9 @@ public class SecurityConfig {
                 .jwt(jwt -> jwt
                     .decoder(jwtDecoder())
                     .jwtAuthenticationConverter(jwtAuthenticationConverter()))
-            );
+            )
+            .addFilterBefore(new ServiceTokenFilter(tokenDeServicio),
+                    UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }
